@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Juragan RT Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Nunito', sans-serif;
+            background-color: #f0fdfa;
+            overflow-x: hidden;
+        }
+        
+        /* Map Tile Animations & Styles */
+        .map-tile {
+            aspect-ratio: 1 / 1;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+        .map-tile:hover.can-build {
+            transform: scale(1.05);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+            z-index: 10;
+        }
+
+        /* Top-down CSS Elements */
+        .grass-texture {
+            background-color: #86efac;
+            background-image: radial-gradient(#4ade80 1px, transparent 1px);
+            background-size: 10px 10px;
+        }
+        .house-roof {
+            background: linear-gradient(135deg, #ef4444 50%, #dc2626 50%);
+            border-bottom: 4px solid #991b1b;
+            border-right: 2px solid #b91c1c;
+            box-shadow: 3px 3px 6px rgba(0,0,0,0.3);
+        }
+        .road-texture {
+            background-color: #64748b;
+        }
+        .road-line-v {
+            background: repeating-linear-gradient(to bottom, transparent, transparent 10px, #e2e8f0 10px, #e2e8f0 20px);
+            width: 4px; height: 100%; margin: 0 auto;
+        }
+        .road-line-h {
+            background: repeating-linear-gradient(to right, transparent, transparent 10px, #e2e8f0 10px, #e2e8f0 20px);
+            height: 4px; width: 100%; position: absolute; top: 50%; transform: translateY(-50%);
+        }
+        .tree-top {
+            background: radial-gradient(circle at 30% 30%, #4ade80, #15803d);
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.4);
+            border-radius: 50%;
+        }
+        .soccer-field {
+            background-color: #22c55e;
+            border: 2px solid white;
+            outline: 2px solid #16a34a;
+        }
+        .soccer-field::before { /* Center circle */
+            content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 30%; height: 30%; border: 2px solid white; border-radius: 50%;
+        }
+
+        .progress-bar-inner { transition: width 0.5s ease-out, background-color 0.5s ease-out; }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .toast { animation: slideIn 0.3s ease-out forwards; }
+        @keyframes pulse-happy {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        .happy-bounce { animation: pulse-happy 1s ease-in-out infinite; }
+        
+        /* Weather Overlay */
+        .overlay-malam { background-color: rgba(15, 23, 42, 0.6); mix-blend-mode: multiply; }
+        .overlay-sore { background-color: rgba(251, 146, 60, 0.2); mix-blend-mode: multiply; }
+        .overlay-hujan { background: linear-gradient(to bottom, rgba(71, 85, 105, 0.4), rgba(71, 85, 105, 0.5)); mix-blend-mode: multiply; }
+        .overlay-cerah { background-color: transparent; }
+    </style>
+</head>
+<body class="text-slate-800 h-screen flex flex-col overflow-hidden relative">
+
+    <!-- Environment/Time Overlay -->
+    <div id="weather-overlay" class="fixed inset-0 pointer-events-none z-10 transition-all duration-1000 overlay-cerah"></div>
+
+    <!-- Header / Navbar -->
+    <header class="bg-teal-700 text-white p-3 shadow-md flex justify-between items-center z-20 shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="text-3xl">🏘️</div>
+            <div class="hidden md:block">
+                <h1 class="text-xl font-extrabold leading-tight">Juragan RT Simulator</h1>
+                <p class="text-teal-200 text-xs">Bina Kampungmu, Bahagiakan Wargamu!</p>
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-4">
+            <!-- Time & Weather Display -->
+            <div class="bg-teal-900/50 px-3 py-1.5 rounded-lg flex flex-col items-center border border-teal-500 min-w-[120px]">
+                <span id="day-time-display" class="font-bold text-sm text-teal-100">Hari 1 | Pagi</span>
+                <span id="weather-display" class="text-xs text-yellow-300 font-semibold">☀️ Cerah</span>
+            </div>
+
+            <!-- Kas RT -->
+            <div class="bg-emerald-600 px-3 py-1.5 rounded-lg flex items-center gap-2 border-2 border-emerald-400 shadow-inner">
+                <span class="text-xl">💰</span>
+                <div class="flex flex-col">
+                    <span class="text-[10px] text-emerald-200 font-bold uppercase tracking-wider">Kas RT</span>
+                    <span class="font-bold text-lg leading-none" id="kas-display">Rp 0</span>
+                </div>
+            </div>
+            
+            <button id="btn-iuran" onclick="tarikIuran()" class="bg-yellow-400 hover:bg-yellow-300 text-yellow-900 font-bold py-1.5 px-4 rounded-lg shadow-md transform transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                <span>💸</span> <span class="hidden md:inline">Tarik Iuran</span>
+                <span id="iuran-cooldown" class="text-xs bg-yellow-600 text-white px-2 py-0.5 rounded-full hidden">0s</span>
+            </button>
+
+            <!-- System Buttons -->
+            <div class="flex gap-2 border-l border-teal-500 pl-4">
+                <button onclick="saveGame()" class="bg-blue-500 hover:bg-blue-400 p-2 rounded-lg text-sm shadow-md transition" title="Simpan Game">💾</button>
+                <button onclick="confirmReset()" class="bg-red-500 hover:bg-red-400 p-2 rounded-lg text-sm shadow-md transition" title="Reset Game">🔄</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Layout -->
+    <main class="flex-1 flex flex-col md:flex-row overflow-hidden p-4 gap-4 max-w-[1400px] mx-auto w-full z-20">
+        
+        <!-- Left Sidebar: Sistem Warga -->
+        <aside class="w-full md:w-1/4 bg-white/95 backdrop-blur rounded-2xl shadow-xl flex flex-col overflow-hidden border border-slate-200">
+            <div class="bg-slate-100 p-3 border-b border-slate-200 font-bold flex justify-between items-center text-slate-700">
+                <span>👥 Daftar Warga</span>
+                <div class="flex gap-2 items-center">
+                    <span class="text-xs text-slate-500">Rata-rata:</span>
+                    <span id="avg-happiness" class="text-xs font-bold px-2 py-1 rounded-full bg-green-100 text-green-700">0%</span>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-3 flex flex-col gap-3" id="warga-list">
+                <!-- Warga items injected here -->
+            </div>
+        </aside>
+
+        <!-- Center: Peta Kampung -->
+        <section class="w-full md:w-2/4 bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-slate-200 flex flex-col">
+            <div class="bg-slate-100 p-3 border-b border-slate-200 font-bold text-center text-slate-700 flex justify-between items-center px-6">
+                <span>🗺️ Peta Kampung Suka Maju</span>
+                <span class="text-xs font-normal text-slate-500">Klik lahan kosong untuk membangun</span>
+            </div>
+            <div class="flex-1 flex items-center justify-center p-6 bg-slate-200 rounded-b-2xl shadow-inner relative overflow-hidden">
+                <!-- 5x5 Grid Map (Top-Down Isometric-ish layout) -->
+                <div class="grid grid-cols-5 gap-1 w-full max-w-[450px] bg-slate-300 p-1 rounded-xl shadow-lg border-2 border-slate-400" id="map-grid">
+                    <!-- Map tiles injected here -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Sidebar: Event & Log -->
+        <aside class="w-full md:w-1/4 flex flex-col gap-4">
+            <!-- Events Panel -->
+            <div class="bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-slate-200 flex flex-col">
+                <div class="bg-orange-50 p-3 border-b border-orange-100 font-bold text-orange-800">
+                    🎉 Event Masyarakat
+                </div>
+                <div class="p-3 grid grid-cols-1 gap-2" id="event-list">
+                    <!-- Events injected here -->
+                </div>
+            </div>
+
+            <!-- Notification Log -->
+            <div class="bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-slate-200 flex-1 flex flex-col overflow-hidden">
+                <div class="bg-slate-100 p-3 border-b border-slate-200 font-bold text-slate-700">
+                    📢 Papan Pengumuman
+                </div>
+                <div class="flex-1 overflow-y-auto p-3 flex flex-col gap-2 text-sm bg-slate-50/50" id="notification-log">
+                    <div class="text-slate-400 italic text-center mt-4">Belum ada aktivitas...</div>
+                </div>
+            </div>
+        </aside>
+
+    </main>
+
+    <!-- Modal Pembangunan Fasilitas -->
+    <div id="build-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 hidden opacity-0 transition-opacity duration-300">
+        <div class="bg-white rounded-2xl shadow-2xl w-[90%] max-w-md overflow-hidden transform scale-95 transition-transform duration-300" id="build-modal-content">
+            <div class="bg-teal-600 p-4 text-white font-bold flex justify-between items-center">
+                <span>🏗️ Bangun Fasilitas</span>
+                <button onclick="closeBuildMenu()" class="hover:text-teal-200 text-2xl leading-none">&times;</button>
+            </div>
+            <div class="p-4 flex flex-col gap-3 max-h-[60vh] overflow-y-auto" id="facility-list">
+                <!-- Facility options -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over Modal -->
+    <div id="game-over-modal" class="fixed inset-0 bg-red-900/80 backdrop-blur-md flex items-center justify-center z-[100] hidden">
+        <div class="bg-white rounded-2xl shadow-2xl w-[90%] max-w-lg overflow-hidden text-center p-8 border-4 border-red-500">
+            <div class="text-6xl mb-4">💥📉😠</div>
+            <h2 class="text-3xl font-extrabold text-red-600 mb-2">GAME OVER!</h2>
+            <p class="text-slate-600 mb-6 text-lg">Kebahagiaan rata-rata warga mencapai 0%. Warga melakukan demo besar-besaran dan Anda dilengserkan dari jabatan RT!</p>
+            
+            <div class="bg-slate-100 p-4 rounded-xl mb-6 text-sm flex justify-around">
+                <div>
+                    <span class="block text-slate-500">Bertahan Selama</span>
+                    <span class="font-bold text-xl text-slate-800" id="go-days">Hari 1</span>
+                </div>
+                <div>
+                    <span class="block text-slate-500">Sisa Uang Kas</span>
+                    <span class="font-bold text-xl text-emerald-600" id="go-money">Rp 0</span>
+                </div>
+            </div>
+
+            <button onclick="resetGame()" class="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition text-lg">
+                🔄 Coba Lagi (Reset)
+            </button>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed bottom-4 right-4 flex flex-col gap-2 z-[60] pointer-events-none"></div>
+
+    <script>
+        // --- GAME DATA & CONFIG ---
+        const firstNames = ["Budi", "Siti", "Joko", "Ani", "Agus", "Sri", "Wahyu", "Dewi", "Ahmad", "Putri", "Dedi", "Ayu", "Eko", "Dina", "Hadi", "Tono", "Rina"];
+        const jobs = ["Guru", "Pedagang", "Pegawai", "Buruh", "Dokter", "Gojek", "Petani", "Mahasiswa", "Wirausaha", "PNS"];
+        const timesOfDay = ['Pagi', 'Siang', 'Sore', 'Malam'];
+        const weathers = ['Cerah', 'Mendung', 'Hujan'];
+        
+        const facilities = [
+            { id: 'taman', name: 'Taman', icon: '🌳', cost: 100, boost: 15, desc: 'Tempat bersantai warga.' },
+            { id: 'sampah', name: 'Tempat Sampah', icon: '🗑️', cost: 50, boost: 10, desc: 'Kampung jadi bersih.' },
+            { id: 'pos', name: 'Pos Ronda', icon: '👮', cost: 150, boost: 20, desc: 'Meningkatkan keamanan.' },
+            { id: 'lapangan', name: 'Lapangan', icon: '⚽', cost: 250, boost: 30, desc: 'Sarana olahraga.' },
+            { id: 'balai', name: 'Balai Warga', icon: '🏛️', cost: 350, boost: 40, desc: 'Pusat kegiatan RT.' }
+        ];
+
+        const eventsData = [
+            { id: 'kerja_bakti', name: 'Kerja Bakti', icon: '🧹', cost: 100, boost: 20, color: 'bg-green-100 text-green-700 border-green-300 hover:bg-green-200' },
+            { id: 'rapat_rt', name: 'Rapat RT', icon: '🗣️', cost: 150, boost: 30, color: 'bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-200' },
+            { id: 'lomba_17', name: 'Perayaan Kampung', icon: '🎉', cost: 400, boost: 60, color: 'bg-red-100 text-red-700 border-red-300 hover:bg-red-200' }
+        ];
+
+        // Default 5x5 Map (0-24)
+        const defaultMap = [
+            'H', 'E', 'R_V', 'E', 'H',
+            'H', 'E', 'R_V', 'E', 'E',
+            'R_H', 'R_H', 'R_X', 'R_H', 'R_H',
+            'E', 'H', 'R_V', 'E', 'H',
+            'H', 'E', 'R_V', 'E', 'E'
+        ];
+
+        // --- GAME STATE ---
+        let gameState = {
+            money: 600,
+            iuranCooldown: 0,
+            day: 1,
+            timeIndex: 0,
+            weather: 'Cerah',
+            gameActive: true
+        };
+        let citizens = [];
+        let mapLayout = [];
+        let gameInterval;
+        let timeTickCounter = 0; // Tracks ticks to advance time of day
+
+        // --- INITIALIZATION & SAVE/LOAD ---
+        function initGame() {
+            if (!loadGame()) {
+                // New Game Setup
+                mapLayout = [...defaultMap];
+                generateCitizens();
+                addLog("🎉 Selamat datang, Bapak/Ibu RT! Mari bangun kampung kita.");
+            } else {
+                addLog("💾 Permainan dimuat dari penyimpanan.");
+            }
+            
+            updateHeader();
+            updateTimeWeatherUI();
+            renderMap();
+            renderCitizens();
+            renderEvents();
+            
+            // Start Loop (1 tick = 1 second)
+            if (gameState.gameActive) {
+                gameInterval = setInterval(gameLoop, 1000);
+            } else {
+                showGameOverModal();
+            }
+        }
+
+        function generateCitizens() {
+            citizens = [];
+            mapLayout.forEach((tile, index) => {
+                if (tile === 'H') {
+                    citizens.push({
+                        id: index,
+                        name: firstNames[Math.floor(Math.random() * firstNames.length)] + " " + firstNames[Math.floor(Math.random() * firstNames.length)][0] + ".",
+                        job: jobs[Math.floor(Math.random() * jobs.length)],
+                        happiness: 70 + Math.floor(Math.random() * 20), // 70-90
+                        houseIndex: index
+                    });
+                }
+            });
+        }
+
+        function saveGame() {
+            if (!gameState.gameActive) return;
+            const data = { gameState, citizens, mapLayout };
+            localStorage.setItem('juraganRT_save', JSON.stringify(data));
+            showToast('Game Berhasil Disimpan! 💾', 'bg-blue-600');
+        }
+
+        function loadGame() {
+            const data = localStorage.getItem('juraganRT_save');
+            if (data) {
+                try {
+                    const parsed = JSON.parse(data);
+                    gameState = parsed.gameState;
+                    citizens = parsed.citizens;
+                    mapLayout = parsed.mapLayout;
+                    return true;
+                } catch (e) {
+                    console.error("Save data corrupted.");
+                    return false;
+                }
+            }
+            return false;
+        }
+
+        function confirmReset() {
+            if (confirm("Yakin ingin mereset game? Semua progres akan hilang!")) {
+                resetGame();
+            }
+        }
+
+        function resetGame() {
+            localStorage.removeItem('juraganRT_save');
+            location.reload();
+        }
+
+        // --- RENDER FUNCTIONS ---
+        function updateHeader() {
+            document.getElementById('kas-display').innerText = `Rp ${gameState.money}`;
+            
+            const btnIuran = document.getElementById('btn-iuran');
+            const cooldownDisplay = document.getElementById('iuran-cooldown');
+            
+            if (gameState.iuranCooldown > 0) {
+                btnIuran.disabled = true;
+                btnIuran.classList.add('opacity-50', 'cursor-not-allowed');
+                cooldownDisplay.classList.remove('hidden');
+                cooldownDisplay.innerText = `${gameState.iuranCooldown}s`;
+            } else {
+                btnIuran.disabled = false;
+                btnIuran.classList.remove('opacity-50', 'cursor-not-allowed');
+                cooldownDisplay.classList.add('hidden');
+            }
+        }
+
+        function updateTimeWeatherUI() {
+            const timeStr = timesOfDay[gameState.timeIndex];
+            document.getElementById('day-time-display').innerText = `Hari ${gameState.day} | ${timeStr}`;
+            
+            let weatherIcon = '☀️';
+            if (gameState.weather === 'Mendung') weatherIcon = '☁️';
+            if (gameState.weather === 'Hujan') weatherIcon = '🌧️';
+            document.getElementById('weather-display').innerText = `${weatherIcon} ${gameState.weather}`;
+
+            // Update Visual Overlay based on Time and Weather
+            const overlay = document.getElementById('weather-overlay');
+            overlay.className = 'fixed inset-0 pointer-events-none z-10 transition-colors duration-1000 ';
+            
+            if (timeStr === 'Malam') overlay.classList.add('overlay-malam');
+            else if (timeStr === 'Sore') overlay.classList.add('overlay-sore');
+            else if (gameState.weather === 'Hujan') overlay.classList.add('overlay-hujan');
+            else overlay.classList.add('overlay-cerah');
+        }
+
+        function renderCitizens() {
+            const list = document.getElementById('warga-list');
+            list.innerHTML = '';
+            
+            let totalHappiness = 0;
+
+            citizens.forEach(c => {
+                totalHappiness += c.happiness;
+                let barColor = 'bg-green-500';
+                let emoji = '😊';
+                if (c.happiness < 30) { barColor = 'bg-red-500'; emoji = '😠'; }
+                else if (c.happiness < 60) { barColor = 'bg-yellow-400'; emoji = '😐'; }
+                
+                const avatarClass = c.happiness > 80 ? 'happy-bounce' : '';
+
+                const el = document.createElement('div');
+                el.className = 'bg-white border border-slate-200 rounded-xl p-2.5 shadow-sm text-sm flex gap-3 items-center transition-all hover:border-teal-300';
+                el.innerHTML = `
+                    <div class="text-2xl bg-slate-100 rounded-full w-10 h-10 flex items-center justify-center ${avatarClass}">${emoji}</div>
+                    <div class="flex-1">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="font-bold text-slate-800">${c.name}</span>
+                            <span class="text-[9px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded uppercase tracking-wider">${c.job}</span>
+                        </div>
+                        <div class="w-full bg-slate-200 rounded-full h-2 overflow-hidden flex items-center">
+                            <div class="${barColor} h-2 rounded-full progress-bar-inner" style="width: ${c.happiness}%"></div>
+                        </div>
+                    </div>
+                `;
+                list.appendChild(el);
+            });
+
+            // Update Average
+            const avg = Math.floor(totalHappiness / citizens.length) || 0;
+            const avgEl = document.getElementById('avg-happiness');
+            avgEl.innerText = `${avg}%`;
+            
+            avgEl.className = 'text-xs font-bold px-2 py-1 rounded-full ';
+            if (avg < 30) avgEl.className += 'bg-red-100 text-red-700';
+            else if (avg < 60) avgEl.className += 'bg-yellow-100 text-yellow-700';
+            else avgEl.className += 'bg-green-100 text-green-700';
+        }
+
+        // --- MAP RENDERER (TOP-DOWN CSS) ---
+        function getTileHTML(type) {
+            switch(type) {
+                case 'E': // Empty Grass
+                    return `<div class="w-full h-full grass-texture rounded-lg"></div>`;
+                case 'H': // House
+                    return `
+                        <div class="w-full h-full grass-texture rounded-lg p-1 relative flex flex-col justify-end">
+                            <div class="w-4/5 h-[70%] house-roof mx-auto rounded-t-sm relative z-10 flex items-center justify-center">
+                                <div class="w-2 h-3 bg-slate-800 absolute bottom-0"></div> <!-- Door -->
+                            </div>
+                            <div class="absolute top-1 right-1 text-[10px]">🌳</div>
+                        </div>`;
+                case 'R_V': // Vertical Road
+                    return `
+                        <div class="w-full h-full road-texture relative">
+                            <div class="road-line-v"></div>
+                        </div>`;
+                case 'R_H': // Horizontal Road
+                    return `
+                        <div class="w-full h-full road-texture relative">
+                            <div class="road-line-h"></div>
+                        </div>`;
+                case 'R_X': // Intersection
+                    return `<div class="w-full h-full road-texture"></div>`;
+                
+                // Facilities
+                case 'taman':
+                    return `
+                        <div class="w-full h-full grass-texture rounded-lg p-1 grid grid-cols-2 gap-1 place-items-center">
+                            <div class="w-5 h-5 tree-top"></div><div class="w-4 h-4 tree-top"></div>
+                            <div class="w-4 h-4 tree-top"></div><div class="w-6 h-6 tree-top"></div>
+                        </div>`;
+                case 'sampah':
+                    return `
+                        <div class="w-full h-full grass-texture rounded-lg flex items-center justify-center">
+                            <div class="w-3/4 h-3/4 bg-slate-200 border-2 border-slate-400 rounded-sm flex items-center justify-center shadow-sm">
+                                <span class="text-lg">🗑️</span>
+                            </div>
+                        </div>`;
+                case 'pos':
+                    return `
+                        <div class="w-full h-full grass-texture rounded-lg p-1 flex items-center justify-center">
+                            <div class="w-3/4 h-3/4 bg-blue-400 border-2 border-blue-600 rounded-md shadow-md flex items-center justify-center">
+                                <span class="text-sm">👮</span>
+                            </div>
+                        </div>`;
+                case 'lapangan':
+                    return `
+                        <div class="w-full h-full p-1 bg-white rounded-lg">
+                            <div class="w-full h-full soccer-field rounded-sm relative"></div>
+                        </div>`;
+                case 'balai':
+                    return `
+                        <div class="w-full h-full grass-texture rounded-lg p-1 flex items-center justify-center">
+                            <div class="w-[90%] h-[80%] bg-purple-100 border-2 border-purple-800 rounded-sm flex flex-col items-center justify-center shadow-lg relative">
+                                <div class="w-full h-2 bg-purple-800 absolute top-0"></div>
+                                <span class="text-xl">🏛️</span>
+                            </div>
+                        </div>`;
+                default:
+                    return `<div class="w-full h-full bg-gray-200"></div>`;
+            }
+        }
+
+        function renderMap() {
+            const grid = document.getElementById('map-grid');
+            grid.innerHTML = '';
+
+            mapLayout.forEach((tile, index) => {
+                const div = document.createElement('div');
+                div.className = `map-tile rounded-lg`;
+                
+                if (tile === 'E') {
+                    div.classList.add('cursor-pointer', 'can-build', 'border-2', 'border-dashed', 'border-green-600/30', 'hover:border-green-600');
+                    div.onclick = () => openBuildMenu(index);
+                }
+
+                div.innerHTML = getTileHTML(tile);
+                grid.appendChild(div);
+            });
+        }
+
+        function renderEvents() {
+            const list = document.getElementById('event-list');
+            list.innerHTML = '';
+
+            eventsData.forEach(ev => {
+                const btn = document.createElement('button');
+                btn.className = `flex justify-between items-center p-3 rounded-xl border-2 transition-transform active:scale-95 ${ev.color}`;
+                btn.onclick = () => triggerEvent(ev);
+                
+                btn.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="text-2xl bg-white/50 p-2 rounded-lg leading-none">${ev.icon}</div>
+                        <div class="text-left">
+                            <div class="font-bold text-sm leading-tight">${ev.name}</div>
+                            <div class="text-[10px] font-bold opacity-80 mt-1 uppercase">😊 +${ev.boost} Bahagia</div>
+                        </div>
+                    </div>
+                    <div class="bg-white/70 px-3 py-1 rounded-lg font-bold text-sm">
+                        Rp ${ev.cost}
+                    </div>
+                `;
+                list.appendChild(btn);
+            });
+        }
+
+        // --- ACTIONS ---
+        function tarikIuran() {
+            if (gameState.iuranCooldown > 0 || !gameState.gameActive) return;
+            
+            const income = citizens.length * 20;
+            gameState.money += income;
+            gameState.iuranCooldown = 15; // 15s cooldown
+            
+            // Tax hurts happiness slightly
+            citizens.forEach(c => { c.happiness = Math.max(0, c.happiness - 3); });
+
+            addLog(`💸 Penarikan iuran selesai! Masuk Rp ${income} ke Kas RT.`);
+            showToast(`+ Rp ${income}`, 'bg-yellow-500');
+            updateHeader();
+            renderCitizens();
+        }
+
+        function openBuildMenu(index) {
+            if (!gameState.gameActive) return;
+            const modal = document.getElementById('build-modal');
+            const content = document.getElementById('build-modal-content');
+            const list = document.getElementById('facility-list');
+            
+            list.innerHTML = '';
+            facilities.forEach(fac => {
+                const canAfford = gameState.money >= fac.cost;
+                const btn = document.createElement('div');
+                btn.className = `flex justify-between items-center p-3 border rounded-xl transition-colors ${canAfford ? 'bg-slate-50 hover:bg-teal-50 cursor-pointer border-slate-200 hover:border-teal-300' : 'bg-slate-100 opacity-50 cursor-not-allowed border-slate-200'}`;
+                
+                if (canAfford) {
+                    btn.onclick = () => buildFacility(fac, index);
+                }
+                
+                btn.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="text-3xl bg-white p-2 rounded-lg shadow-sm">${fac.icon}</div>
+                        <div>
+                            <div class="font-bold text-slate-800">${fac.name}</div>
+                            <div class="text-[10px] text-slate-500 leading-tight mt-0.5">${fac.desc}</div>
+                            <div class="text-[10px] text-green-600 font-bold mt-1 uppercase">😊 +${fac.boost} Bahagia</div>
+                        </div>
+                    </div>
+                    <div class="font-bold ${canAfford ? 'text-teal-700 bg-teal-100' : 'text-red-500 bg-red-100'} px-3 py-1.5 rounded-lg text-sm">
+                        Rp ${fac.cost}
+                    </div>
+                `;
+                list.appendChild(btn);
+            });
+
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                modal.classList.remove('opacity-0');
+                content.classList.remove('scale-95');
+            }, 10);
+        }
+
+        function closeBuildMenu() {
+            const modal = document.getElementById('build-modal');
+            const content = document.getElementById('build-modal-content');
+            modal.classList.add('opacity-0');
+            content.classList.add('scale-95');
+            setTimeout(() => { modal.classList.add('hidden'); }, 300);
+        }
+
+        function buildFacility(facility, index) {
+            if (gameState.money < facility.cost) return;
+
+            gameState.money -= facility.cost;
+            mapLayout[index] = facility.id;
+            
+            citizens.forEach(c => {
+                c.happiness = Math.min(100, c.happiness + facility.boost);
+            });
+
+            addLog(`🏗️ <b>${facility.name}</b> berhasil dibangun! Warga sangat senang.`);
+            showToast(`Warga Senang! 😊`, 'bg-green-500');
+            
+            closeBuildMenu();
+            updateHeader();
+            renderMap();
+            renderCitizens();
+            saveGame(); // Auto-save on major action
+        }
+
+        function triggerEvent(eventData) {
+            if (!gameState.gameActive) return;
+            if (gameState.money < eventData.cost) {
+                showToast('❌ Kas RT tidak cukup!', 'bg-red-500');
+                return;
+            }
+
+            gameState.money -= eventData.cost;
+            citizens.forEach(c => {
+                c.happiness = Math.min(100, c.happiness + eventData.boost);
+            });
+
+            addLog(`📢 <b>${eventData.name}</b> sukses digelar! Kebahagiaan warga meningkat tajam.`);
+            showToast(`${eventData.name} Sukses! 🎉`, 'bg-blue-500');
+            
+            updateHeader();
+            renderCitizens();
+            saveGame(); // Auto-save on major action
+        }
+
+        // --- UTILS & GAME LOOP ---
+        function addLog(message) {
+            const logContainer = document.getElementById('notification-log');
+            if (logContainer.innerHTML.includes('Belum ada aktivitas')) { logContainer.innerHTML = ''; }
+
+            const time = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+            const msgEl = document.createElement('div');
+            msgEl.className = 'p-2 bg-white border border-slate-200 rounded-lg shadow-sm border-l-4 border-l-teal-500 animate-[slideIn_0.3s_ease-out]';
+            msgEl.innerHTML = `<div class="text-[9px] text-slate-400 font-bold mb-0.5">${time} - Hari ${gameState.day}</div><div>${message}</div>`;
+            
+            logContainer.prepend(msgEl);
+            if (logContainer.children.length > 20) { logContainer.removeChild(logContainer.lastChild); }
+        }
+
+        function showToast(message, bgColor) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${bgColor} text-white px-4 py-3 rounded-xl shadow-lg font-bold flex items-center gap-2 border border-white/20`;
+            toast.innerHTML = message;
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(100%)';
+                toast.style.transition = 'all 0.3s ease-out';
+                setTimeout(() => toast.remove(), 300);
+            }, 2500);
+        }
+
+        function checkGameOver() {
+            const avgHappiness = Math.floor(citizens.reduce((acc, c) => acc + c.happiness, 0) / citizens.length);
+            if (avgHappiness <= 0 && gameState.gameActive) {
+                gameState.gameActive = false;
+                clearInterval(gameInterval);
+                showGameOverModal();
+                localStorage.removeItem('juraganRT_save'); // Delete save on game over
+            }
+        }
+
+        function showGameOverModal() {
+            document.getElementById('go-days').innerText = `Hari ke-${gameState.day}`;
+            document.getElementById('go-money').innerText = `Rp ${gameState.money}`;
+            document.getElementById('game-over-modal').classList.remove('hidden');
+        }
+
+        function gameLoop() {
+            if (!gameState.gameActive) return;
+
+            // 1. Handle Cooldowns
+            if (gameState.iuranCooldown > 0) {
+                gameState.iuranCooldown--;
+                updateHeader();
+            }
+
+            // 2. Advance In-Game Time (Every 8 real seconds = 1 time segment)
+            timeTickCounter++;
+            if (timeTickCounter >= 8) {
+                timeTickCounter = 0;
+                gameState.timeIndex++;
+                
+                if (gameState.timeIndex > 3) {
+                    gameState.timeIndex = 0;
+                    gameState.day++;
+                    // Random weather change at start of new day
+                    gameState.weather = weathers[Math.floor(Math.random() * weathers.length)];
+                    addLog(`🌅 Hari ke-${gameState.day} dimulai. Cuaca hari ini: ${gameState.weather}`);
+                    saveGame(); // Auto-save everyday
+                }
+                updateTimeWeatherUI();
+            }
+
+            // 3. Decrease Citizen Happiness
+            let needsRender = false;
+            // Base drop chance is 40%. Weather modifiers: Mendung (50%), Hujan (60%), Malam (less drop 30%)
+            let dropChance = 0.4;
+            if (gameState.weather === 'Mendung') dropChance = 0.5;
+            if (gameState.weather === 'Hujan') dropChance = 0.6;
+            if (gameState.timeIndex === 3) dropChance -= 0.1; // Malam warga tidur, drop rate turun
+
+            citizens.forEach(c => {
+                if (Math.random() < dropChance) {
+                    c.happiness = Math.max(0, c.happiness - 1);
+                    needsRender = true;
+                }
+            });
+
+            if (needsRender) {
+                renderCitizens();
+                checkGameOver();
+                
+                // Warning if average happiness is critical (<15)
+                const avgHappiness = Math.floor(citizens.reduce((acc, curr) => acc + curr.happiness, 0) / citizens.length);
+                if (avgHappiness > 0 && avgHappiness < 15 && Math.random() < 0.05) { 
+                    addLog("⚠️ Warga mulai membakar ban! Segera tingkatkan kebahagiaan mereka!");
+                    showToast("Warga Kritis!", "bg-red-600");
+                }
+            }
+        }
+
+        // Start
+        window.onload = initGame;
+    </script>
+</body>
+</html>
